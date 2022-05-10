@@ -1,8 +1,14 @@
-use std::{path::Path, io::Write};
+use std::{path::Path, io::Read};
 use notify::{RecursiveMode, Watcher};
 use tokio;
 use std::io::BufReader;
-use chrono::Utc;
+use serde_json::{Value};
+
+#[macro_use] extern crate log;
+extern crate simplelog;
+
+use simplelog::*;
+use std::fs::File;
 
 #[derive(Clone)]
 struct BackupConfig {
@@ -21,9 +27,9 @@ struct BackupJobConfig {
 }
 
 async fn backup(job:&BackupJobConfig,config:&BackupConfig) -> Result<(),()>{
-    log(format!("FS Changes detected on {}, backup scheduled in {} seconds.",job.path,job.throttle),&config.logfile);
+    info!("FS Changes detected on {}, backup scheduled in {} seconds.",job.path,job.throttle);
     tokio::time::sleep(std::time::Duration::from_secs(job.throttle)).await;
-    log(format!("{} Backup on {} initiating.",job.name,job.path),&config.logfile);
+    info!("{} Backup on {} initiating.",job.name,job.path);
     let job = job.clone();
     let config = config.clone();
     let mut cmd = std::process::Command::new(config.restic_path)
@@ -31,6 +37,8 @@ async fn backup(job:&BackupJobConfig,config:&BackupConfig) -> Result<(),()>{
         .env("RESTIC_PASSWORD_COMMAND",config.password_command)
         .arg("-r")
         .arg(config.repo)
+        .arg("--json")
+        .arg("-q")
         .arg("--exclude-file")
         .arg(config.exclude_file)
         .arg("backup")
@@ -41,16 +49,19 @@ async fn backup(job:&BackupJobConfig,config:&BackupConfig) -> Result<(),()>{
 
     let mut reader = BufReader::new(cmd.stdout.take().unwrap());
     let mut err_reader = BufReader::new(cmd.stderr.take().expect("No err captured"));
-
-    let mut stdout = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .write(true)
-        .open(config.logfile)
-        .expect("open file error");
-    let mut stderr = stdout.try_clone().expect("Error while trying to clone file instance.");
-    std::io::copy(&mut reader, &mut stdout).expect("Unable to attach stdout");
-    std::io::copy(&mut err_reader, &mut stderr).expect("Unable to attach stderr");
+    
+    let mut result = String::new();
+    if reader.read_to_string(&mut result).is_err() {error!("Unable to parse response from restic.");}
+    cmd.wait();
+    match serde_json::from_str::<Value>(&result) {
+        Ok(v) => {
+            info!("Backup Complete. - {} new, {} changed, finished in {} seconds.", v["files_new"], v["files_changed"], v["total_duration"]);
+        },
+        Err(_) => {
+            error!("Unable to parse restic response json: Raw resp: {}",result);
+        }
+    };
+    
     Ok(())
 }
 
@@ -63,11 +74,11 @@ async fn start_watching(job:BackupJobConfig,config:&BackupConfig) {
         }
     }).unwrap();
     watcher.watch(Path::new(&job.path), RecursiveMode::Recursive).expect(&format!("Failed to start watching on path {}",&job.path));
-    log(format!("Started FSEvent monitoring on {} named {} - interval={}",&job.path,&job.name,&job.throttle),&config.logfile);
+    info!("Started FSEvent monitoring on {} named {} - interval={}",&job.path,&job.name,&job.throttle);
     loop {
         rx.recv().await.unwrap();
         tokio::select! {
-            _ = backup(&job,config) => {log(format!("Backup finished."),&config.logfile)},
+            _ = backup(&job,config) => {},
             _ = async {
                 loop {
                     rx.recv().await;
@@ -77,20 +88,10 @@ async fn start_watching(job:BackupJobConfig,config:&BackupConfig) {
     }
 }
 
-fn log<S>(msg:S,logfile_path:&String)
-where S: Into<String>
-{
-    let msg = format!("{} {} \n",Utc::now().format("%Y-%m-%d %H:%M:%S ").to_string(),msg.into());
-    let mut logfile = std::fs::OpenOptions::new()
-        .append(true)
-        .open(logfile_path)
-        .expect("Unable to open logfile.");
-    logfile.write(msg.as_bytes()).expect("Unable to write to log");
-}
-
 async fn unlock_repository(config:&BackupConfig) {
+    info!("Unlocking Repository");
     let config = config.clone();
-    log("Attempting to remove stale lock", &config.logfile);
+    info!("Attempting to remove stale lock");
     std::process::Command::new(config.restic_path)
         .env("PATH",config.env_path)
         .env("RESTIC_PASSWORD_COMMAND",config.password_command)
@@ -100,7 +101,7 @@ async fn unlock_repository(config:&BackupConfig) {
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .spawn().expect("Failed to spawn restic process.").wait().expect("Failed to remove stale lock.");
-    
+    info!("Lock removed success.")
 }
 
 #[tokio::main]
@@ -117,6 +118,11 @@ async fn main() {
         env_path: y[0]["env-path"].as_str().unwrap().to_owned(),
         restic_path: y[0]["restic-path"].as_str().unwrap().to_owned()
     };
+
+    // Configure Logging
+    let term_logger = TermLogger::new(LevelFilter::Info, Config::default(), TerminalMode::Mixed, ColorChoice::Auto);
+    let write_logger = WriteLogger::new(LevelFilter::Info, Config::default(), File::create(&config.logfile).expect("Unable to create logfile."));
+    CombinedLogger::init(vec![term_logger,write_logger]).unwrap();
 
     unlock_repository(&config).await;
 
