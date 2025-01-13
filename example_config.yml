@@ -1,0 +1,15 @@
+repo: "your-restic-repository-path"
+exclude-file: "path-to-restic-exclude-file"
+password-command: "command-to-get-repository-password"
+logfile: "path-to-logfile"
+restic-path: "path-to-restic-binary"
+
+dirs:
+  - name: "backup-job-name"
+    path: "/path/to/watch"
+    throttle: 60  # Delay in seconds before triggering backup after changes
+
+  # Add more directories as needed
+  - name: "another-backup"
+    path: "/another/path"
+    throttle: 120

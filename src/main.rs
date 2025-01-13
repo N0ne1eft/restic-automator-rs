@@ -16,7 +16,6 @@ struct BackupConfig {
     exclude_file: String,
     password_command: String,
     logfile: String,
-    env_path: String,
     restic_path: String
 }
 #[derive(Clone)]
@@ -33,7 +32,6 @@ async fn backup(job:&BackupJobConfig,config:&BackupConfig) -> Result<(),()>{
     let job = job.clone();
     let config = config.clone();
     let mut cmd = std::process::Command::new(config.restic_path)
-        .env("PATH",config.env_path)
         .env("RESTIC_PASSWORD_COMMAND",config.password_command)
         .arg("-r")
         .arg(config.repo)
@@ -93,7 +91,6 @@ async fn unlock_repository(config:&BackupConfig) {
     let config = config.clone();
     info!("Attempting to remove stale lock");
     std::process::Command::new(config.restic_path)
-        .env("PATH",config.env_path)
         .env("RESTIC_PASSWORD_COMMAND",config.password_command)
         .arg("-r")
         .arg(config.repo)
@@ -115,7 +112,6 @@ async fn main() {
         exclude_file: y[0]["exclude-file"].as_str().unwrap().to_owned(),
         password_command: y[0]["password-command"].as_str().unwrap().to_owned(),
         logfile: y[0]["logfile"].as_str().unwrap().to_owned(),
-        env_path: y[0]["env-path"].as_str().unwrap().to_owned(),
         restic_path: y[0]["restic-path"].as_str().unwrap().to_owned()
     };
 
