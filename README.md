@@ -41,7 +41,6 @@ repo: "your-restic-repository-path"
 exclude-file: "path-to-exclude-file"
 password-command: "command-to-get-repository-password"
 logfile: "path-to-logfile"
-env-path: "system-path"  # Optional - defaults to current system PATH
 restic-path: "path-to-restic-binary"
 
 dirs:
@@ -61,7 +60,6 @@ dirs:
 - `exclude-file`: Path to the file containing patterns to exclude from backup
 - `password-command`: Command that outputs your repository password
 - `logfile`: Path where logs will be written
-- `env-path`: (Optional) System PATH environment variable. If not specified, the current system PATH will be used
 - `restic-path`: Path to the restic binary
 - `dirs`: List of directories to monitor
   - `name`: Unique name for the backup job
